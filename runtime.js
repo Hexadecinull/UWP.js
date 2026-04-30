@@ -1,16 +1,41 @@
+import { parseAllAssemblies } from './assemblies.js';
+
+const PRIM_NAMES = new Set(['Cube','Sphere','Cylinder','Capsule','Plane','Quad']);
+
+function vec3(o) {
+    if (!o) return { x:0, y:0, z:0 };
+    if (Array.isArray(o)) return { x:o[0]??0, y:o[1]??0, z:o[2]??0 };
+    return { x: o.x??0, y: o.y??0, z: o.z??0 };
+}
+
+function quat(o) {
+    if (!o) return { x:0, y:0, z:0, w:1 };
+    return { x:o.x??0, y:o.y??0, z:o.z??0, w:o.w??1 };
+}
+
+function rgba(c) {
+    if (!c) return [0.7, 0.7, 0.7, 1.0];
+    if (Array.isArray(c)) return c;
+    return [c.r??0.7, c.g??0.7, c.b??0.7, c.a??1.0];
+}
+
+function inferMeshName(goName) {
+    for (const prim of PRIM_NAMES) {
+        if (goName.toLowerCase().includes(prim.toLowerCase())) return prim;
+    }
+    return null;
+}
+
 export class UWPjsRuntime {
     constructor() {
-        this.assemblies     = new Map();
-        this.gameObjects    = new Map();
-        this.components     = new Map();
-        this.sceneRoot      = [];
-        this.running        = false;
-        this._frameId       = null;
-        this._onFrame       = null;
-        this._listeners     = {};
-
-        this._monoReady  = false;
-        this._pakoReady  = false;
+        this.assemblies    = new Map();
+        this.assemblyMeta  = [];
+        this.gameObjects   = new Map();
+        this.sceneRoot     = [];
+        this.running       = false;
+        this._frameId      = null;
+        this._onFrame      = null;
+        this._listeners    = {};
     }
 
     on(event, fn) {
@@ -19,32 +44,42 @@ export class UWPjsRuntime {
         return this;
     }
 
-    _emit(event, data) {
-        (this._listeners[event] ?? []).forEach(fn => fn(data));
+    _emit(event, data) { (this._listeners[event] ?? []).forEach(fn => fn(data)); }
+
+    _log(msg) {
+        console.log('[Runtime]', msg);
+        this._emit('log', msg);
     }
 
     async init() {
-        this._log('Runtime init — C# execution simulated (Mono/IL2CPP not yet wired)');
-        this._emit('ready', { monoReady: false });
+        this._log('Runtime init — C# execution simulated (Mono/IL2CPP not wired)');
+        this._emit('ready', {});
     }
 
     loadAssemblies(files) {
-        for (const f of files) {
-            if (!f.name.endsWith('.dll')) continue;
-            this.assemblies.set(f.name, f.data ?? new Uint8Array(f.buffer));
-            this._log(`Loaded assembly: ${f.name} (${(f.data?.length ?? f.buffer?.byteLength ?? 0)} bytes)`);
+        const parsed = parseAllAssemblies(files);
+        for (const asm of parsed) {
+            this.assemblies.set(asm.name, asm);
+            if (asm.ok) {
+                this._log(`Assembly: ${asm.name} — ${asm.assemblyName} v${asm.version} — ${asm.typeCount} types, ${asm.methodCount} methods`);
+            } else {
+                this._log(`Assembly: ${asm.name} — parse error: ${asm.error}`);
+            }
         }
-        this._emit('assemblies', { count: this.assemblies.size });
+        this.assemblyMeta = parsed;
+        this._emit('assemblies', { count: parsed.length, assemblies: parsed });
+        return parsed;
     }
 
     buildSceneGraph(assetFiles) {
-        const gameObjects  = [];
-        const transforms   = [];
-        const meshFilters  = [];
-        const meshRenderers= [];
-        const cameras      = [];
-        const lights       = [];
-        const monoBehaviours = [];
+        const gameObjects   = [];
+        const transforms    = [];
+        const cameras       = [];
+        const lights        = [];
+        const meshRenderers = [];
+        const meshFilters   = [];
+        const monoBehaviours= [];
+        const materials     = [];
 
         for (const { objects } of assetFiles) {
             if (!objects) continue;
@@ -53,6 +88,7 @@ export class UWPjsRuntime {
                     case 1:   gameObjects.push(obj);    break;
                     case 4:   transforms.push(obj);     break;
                     case 20:  cameras.push(obj);        break;
+                    case 21:  materials.push(obj);      break;
                     case 23:  meshRenderers.push(obj);  break;
                     case 33:  meshFilters.push(obj);    break;
                     case 108: lights.push(obj);         break;
@@ -63,64 +99,147 @@ export class UWPjsRuntime {
 
         for (const go of gameObjects) {
             this.gameObjects.set(go.pathID, {
-                pathID:     go.pathID,
-                name:       go.name || `GameObject#${go.pathID}`,
-                isActive:   go.isActive ?? 1,
-                layer:      go.layer ?? 0,
-                components: [],
-                children:   [],
-                parent:     null,
-                localPosition: { x: 0, y: 0, z: 0 },
-                localRotation: { x: 0, y: 0, z: 0, w: 1 },
-                localScale:    { x: 1, y: 1, z: 1 },
+                pathID:        go.pathID,
+                name:          go.name || `GameObject#${go.pathID}`,
+                isActive:      go.isActive ?? 1,
+                layer:         go.layer ?? 0,
+                components:    go.components ?? [],
+                children:      [],
+                parent:        null,
+                localPosition: { x:0, y:0, z:0 },
+                localRotation: { x:0, y:0, z:0, w:1 },
+                localScale:    { x:1, y:1, z:1 },
+                meshName:      null,
+                color:         null,
             });
         }
 
         for (const tf of transforms) {
-            const goRef = tf.father ?? tf.m_GameObject;
-            const goPathID = goRef?.m_PathID ?? goRef?.pathID ?? null;
-            const go = goPathID !== null
-                ? this.gameObjects.get(goPathID)
-                : this.gameObjects.get(tf.pathID);
+            const goPathID = tf.m_GameObject?.m_PathID ?? tf.m_GameObject?.pathID ?? tf.pathID;
+            const go = this.gameObjects.get(goPathID) ?? this.gameObjects.get(tf.pathID);
             if (go) {
-                go.localPosition = tf.localPosition ?? go.localPosition;
-                go.localRotation = tf.localRotation ?? go.localRotation;
-                go.localScale    = tf.localScale    ?? go.localScale;
+                go.localPosition = vec3(tf.localPosition);
+                go.localRotation = quat(tf.localRotation);
+                go.localScale    = vec3(tf.localScale) ?? { x:1, y:1, z:1 };
+                if (go.localScale.x === 0 && go.localScale.y === 0 && go.localScale.z === 0) {
+                    go.localScale = { x:1, y:1, z:1 };
+                }
+
+                const fatherRef = tf.m_Father ?? tf.father;
+                if (fatherRef) {
+                    const parentPathID = fatherRef.m_PathID ?? fatherRef.pathID;
+                    if (parentPathID && parentPathID !== 0) {
+                        const parentGO = this.gameObjects.get(parentPathID);
+                        if (parentGO) { go.parent = parentPathID; parentGO.children.push(go.pathID); }
+                    }
+                }
             }
         }
 
+        const parsedCameras = cameras.map(cam => {
+            const go = this.gameObjects.get(cam.m_GameObject?.m_PathID ?? cam.pathID);
+            return {
+                name:         go?.name ?? 'Camera',
+                position:     go?.localPosition ?? { x:0, y:1, z:-10 },
+                rotation:     go?.localRotation ?? { x:0, y:0, z:0, w:1 },
+                forward:      quatForward(go?.localRotation),
+                fieldOfView:  cam.fieldOfView  ?? cam.m_FieldOfView  ?? 60,
+                nearClip:     cam.nearClipPlane ?? cam.m_NearClipPlane ?? 0.1,
+                farClip:      cam.farClipPlane  ?? cam.m_FarClipPlane  ?? 1000,
+                clearFlags:   cam.m_ClearFlags  ?? 1,
+                backgroundColor: rgba(cam.m_BackGroundColor ?? cam.backgroundColor),
+            };
+        });
+
+        const parsedLights = lights.map(lt => {
+            const go  = this.gameObjects.get(lt.m_GameObject?.m_PathID ?? lt.pathID);
+            const pos = go?.localPosition ?? { x:0, y:5, z:0 };
+            const fwd = quatForward(go?.localRotation);
+            const col = rgba(lt.m_Color ?? lt.color);
+            return {
+                name:      go?.name ?? 'Light',
+                pos:       [pos.x, pos.y, pos.z],
+                color:     [col[0], col[1], col[2]],
+                intensity: lt.m_Intensity ?? lt.intensity ?? 1,
+                type:      lt.m_Type ?? lt.type ?? 0,
+                range:     lt.m_Range ?? lt.range ?? 10,
+                forward:   fwd,
+            };
+        });
+
+        for (const mf of meshFilters) {
+            const goPathID = mf.m_GameObject?.m_PathID ?? mf.pathID;
+            const go = this.gameObjects.get(goPathID);
+            if (!go) continue;
+            const meshRef = mf.m_Mesh ?? mf.mesh;
+            if (meshRef) {
+                const meshName = typeof meshRef === 'string' ? meshRef : null;
+                if (!go.meshName) go.meshName = meshName ?? inferMeshName(go.name);
+            } else {
+                if (!go.meshName) go.meshName = inferMeshName(go.name);
+            }
+        }
+
+        for (const mr of meshRenderers) {
+            const goPathID = mr.m_GameObject?.m_PathID ?? mr.pathID;
+            const go = this.gameObjects.get(goPathID);
+            if (!go) continue;
+            const mats = mr.m_Materials ?? mr.materials;
+            if (Array.isArray(mats) && mats.length > 0) {
+                const matRef = mats[0];
+                const matPathID = matRef?.m_PathID ?? matRef?.pathID;
+                if (matPathID) {
+                    const mat = materials.find(m => m.pathID === matPathID);
+                    if (mat) go.color = rgba(mat.m_Color ?? mat.color);
+                }
+            }
+        }
+
+        for (const go of this.gameObjects.values()) {
+            if (!go.meshName) go.meshName = inferMeshName(go.name);
+        }
+
+        const allMonoNames = this.assemblyMeta
+            .filter(a => a.ok)
+            .flatMap(a => a.monoBehaviours ?? [])
+            .map(t => t.fullName);
+
         const scene = {
-            gameObjects:  [...this.gameObjects.values()],
-            cameras,
-            lights,
+            gameObjects:     [...this.gameObjects.values()],
+            cameras:         parsedCameras,
+            lights:          parsedLights,
             meshFilters,
             meshRenderers,
             monoBehaviours,
-            assemblies:   [...this.assemblies.keys()],
+            materials,
+            assemblies:      [...this.assemblies.keys()],
+            assemblyTypes:   allMonoNames,
         };
 
         this.sceneRoot = scene.gameObjects.filter(go => !go.parent);
+
+        this._log(`Scene: ${scene.gameObjects.length} GOs, ${parsedCameras.length} cameras, ${parsedLights.length} lights, ${monoBehaviours.length} MonoBehaviours`);
+        if (allMonoNames.length > 0) {
+            this._log(`Script types: ${allMonoNames.slice(0, 8).join(', ')}${allMonoNames.length > 8 ? ` … (+${allMonoNames.length-8})` : ''}`);
+        }
+
         this._emit('scene', scene);
-        this._log(`Scene graph built — ${scene.gameObjects.length} GameObjects, ${cameras.length} cameras, ${lights.length} lights, ${monoBehaviours.length} MonoBehaviours`);
         return scene;
     }
 
     simulateLifecycle(scene) {
-        this._log('Simulating Awake() → OnEnable() → Start() …');
-
+        this._log('Simulating Awake → OnEnable → Start …');
         for (const mb of scene.monoBehaviours) {
-            const scriptName = mb.name || '(anonymous MonoBehaviour)';
-            this._log(`  [Awake]  ${scriptName}`);
             this._emit('awake', mb);
         }
-
         for (const mb of scene.monoBehaviours) {
-            const scriptName = mb.name || '(anonymous MonoBehaviour)';
-            this._log(`  [Start]  ${scriptName}`);
             this._emit('start', mb);
         }
+        this._log(`Lifecycle done — ${scene.monoBehaviours.length} MonoBehaviours signalled`);
+    }
 
-        this._log('Lifecycle simulation complete');
+    getSceneNodes() {
+        return [...this.gameObjects.values()].filter(go => go.meshName && go.isActive !== 0);
     }
 
     startLoop(onFrame) {
@@ -132,10 +251,7 @@ export class UWPjsRuntime {
 
     stopLoop() {
         this.running = false;
-        if (this._frameId !== null) {
-            cancelAnimationFrame(this._frameId);
-            this._frameId = null;
-        }
+        if (this._frameId !== null) { cancelAnimationFrame(this._frameId); this._frameId = null; }
     }
 
     _tick() {
@@ -144,9 +260,14 @@ export class UWPjsRuntime {
         this._emit('update', null);
         this._frameId = requestAnimationFrame(() => this._tick());
     }
+}
 
-    _log(msg) {
-        console.log('[UWPjsRuntime]', msg);
-        this._emit('log', msg);
-    }
+function quatForward(rot) {
+    if (!rot) return [0, 0, 1];
+    const { x:qx=0, y:qy=0, z:qz=0, w:qw=1 } = rot;
+    return [
+        2*(qx*qz + qw*qy),
+        2*(qy*qz - qw*qx),
+        1 - 2*(qx*qx + qy*qy),
+    ];
 }

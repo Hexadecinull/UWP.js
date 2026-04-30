@@ -134,6 +134,27 @@ function handleTextAssets(objects) {
     }
 }
 
+function handleAudio(objects, emulator) {
+    const clips = objects.filter(o => o.classID === 83);
+    if (!clips.length) return;
+    makeSectionHeader('Audio Clips', clips.length);
+    for (const clip of clips) {
+        const card = makeCard(
+            clip.name || '(unnamed)',
+            `${clip.channels ?? '?'}ch  ${clip.frequency ?? '?'} Hz  ${clip.bitsPerSample ?? '?'}-bit`
+        );
+        if (emulator && clip.name) {
+            const actions = document.createElement('div');
+            actions.className = 'asset-actions';
+            const btn = document.createElement('button');
+            btn.textContent = '▶ Play';
+            btn.onclick = () => emulator.playClip(clip.name);
+            actions.appendChild(btn);
+            card.appendChild(actions);
+        }
+    }
+}
+
 function handleMeshes(objects) {
     const meshes = objects.filter(o => o.classID === 43);
     if (!meshes.length) return;
@@ -144,21 +165,32 @@ function handleMeshes(objects) {
 }
 
 function handleOtherAssets(objects) {
-    const skip = new Set([28, 49, 43]);
+    const skip = new Set([28, 49, 43, 83]);
     const rest = objects.filter(o => !skip.has(o.classID));
     if (!rest.length) return;
-
     const byClass = new Map();
     for (const o of rest) {
-        const k = o.className;
-        if (!byClass.has(k)) byClass.set(k, []);
-        byClass.get(k).push(o);
+        if (!byClass.has(o.className)) byClass.set(o.className, []);
+        byClass.get(o.className).push(o);
     }
-
     makeSectionHeader('Other Assets', rest.length);
     for (const [cls, items] of byClass) {
         const names = items.map(i => i.name || '?').filter(Boolean).slice(0, 8).join(', ');
         makeCard(cls, `${items.length} object${items.length !== 1 ? 's' : ''}${names ? ' — ' + names : ''}`);
+    }
+}
+
+function buildAssemblyPanel(scene) {
+    if (!scenePanel || !scene?.assemblyTypes?.length) return;
+    const h = document.createElement('div');
+    h.className = 'section-header';
+    h.textContent = `Script Types — ${scene.assemblyTypes.length}`;
+    scenePanel.appendChild(h);
+    for (const t of scene.assemblyTypes.slice(0, 100)) {
+        const row = document.createElement('div');
+        row.className   = 'scene-row';
+        row.textContent = t;
+        scenePanel.appendChild(row);
     }
 }
 
@@ -250,6 +282,7 @@ unityFileInput.addEventListener('change', async (e) => {
 
     let totalObjects = 0;
     const allObjects = [];
+    const sfList     = [];
 
     for (const f of files) {
         if (f.name.endsWith('.dll') || f.name.endsWith('.mdb')) {
@@ -275,11 +308,12 @@ unityFileInput.addEventListener('change', async (e) => {
         appendStatus(`  Unity ${sf.unityVersion}  SF v${sf.version}  types=${sf.typeCount}  objects=${sf.objectCount}${sf.truncated ? ' (capped at 2000)' : ''}`);
         totalObjects += sf.objectCount;
         allObjects.push(...sf.objects);
+        sfList.push(sf);
 
         await handleTextures(sf.objects);
         handleTextAssets(sf.objects);
         handleMeshes(sf.objects);
-        handleOtherAssets(sf.objects);
+        handleAudio(sf.objects, null);
     }
 
     appendStatus(`\nDone — ${totalObjects} total object${totalObjects !== 1 ? 's' : ''} across ${files.length} file${files.length !== 1 ? 's' : ''}.`);
@@ -290,5 +324,13 @@ unityFileInput.addEventListener('change', async (e) => {
         onLog: msg => appendRuntimeLog(msg),
     });
     const result = await activeEmulator.start();
-    if (result?.scene) buildSceneTree(result.scene);
+    if (result?.scene) {
+        buildSceneTree(result.scene);
+        buildAssemblyPanel(result.scene);
+    }
+
+    for (const sf of sfList ?? []) {
+        handleAudio(sf.objects, activeEmulator);
+        handleOtherAssets(sf.objects);
+    }
 });
