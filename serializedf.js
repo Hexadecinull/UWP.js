@@ -403,27 +403,125 @@ export function parseSerializedFile(buffer, fileName) {
                     asset.formatName    = TEXFMT.get(d?.m_TextureFormat) ?? `fmt${d?.m_TextureFormat}`;
                     const raw = extractRawBytes(d?.['image data']);
                     if (raw && raw.length > 0) asset.imageData = raw;
+
+                } else if (classID === 21) {
+                    const sp = d?.m_SavedProperties;
+                    asset.shader        = d?.m_Shader;
+                    asset.renderQueue   = d?.m_CustomRenderQueue ?? -1;
+                    asset.colors        = {};
+                    asset.floats        = {};
+                    asset.textures      = {};
+                    if (sp) {
+                        const texEnvs  = sp.m_TexEnvs ?? sp.TexEnvs ?? [];
+                        const floats   = sp.m_Floats   ?? sp.Floats   ?? [];
+                        const colors   = sp.m_Colors   ?? sp.Colors   ?? [];
+                        const extractPairs = (arr) => Array.isArray(arr) ? arr : (arr?.Array ?? []);
+                        for (const pair of extractPairs(texEnvs)) {
+                            const key = pair?.first ?? pair?.Key ?? pair?.[0];
+                            const val = pair?.second ?? pair?.Value ?? pair?.[1];
+                            if (typeof key === 'string' && val) {
+                                asset.textures[key] = { texRef: val?.m_Texture ?? val?.texture, scale: val?.m_Scale, offset: val?.m_Offset };
+                            }
+                        }
+                        for (const pair of extractPairs(floats)) {
+                            const key = pair?.first ?? pair?.Key ?? pair?.[0];
+                            const val = pair?.second ?? pair?.Value ?? pair?.[1];
+                            if (typeof key === 'string' && typeof val === 'number') asset.floats[key] = val;
+                        }
+                        for (const pair of extractPairs(colors)) {
+                            const key = pair?.first ?? pair?.Key ?? pair?.[0];
+                            const val = pair?.second ?? pair?.Value ?? pair?.[1];
+                            if (typeof key === 'string' && val) {
+                                asset.colors[key] = [val.r ?? val.x ?? 1, val.g ?? val.y ?? 1, val.b ?? val.z ?? 1, val.a ?? val.w ?? 1];
+                            }
+                        }
+                    }
+                    asset.color     = asset.colors['_Color']     ?? asset.colors['_BaseColor'] ?? [1,1,1,1];
+                    asset.shininess = (asset.floats['_Shininess'] ?? asset.floats['_Glossiness'] ?? 0.5) * 96;
+                    asset.mainTex   = asset.textures['_MainTex']  ?? asset.textures['_BaseMap'] ?? null;
+
                 } else if (classID === 43) {
                     asset.meshData = d;
+
+                } else if (classID === 20) {
+                    asset.m_GameObject    = d?.m_GameObject;
+                    asset.fieldOfView     = d?.field_of_view ?? d?.m_FieldOfView ?? d?.fieldOfView ?? 60;
+                    asset.nearClipPlane   = d?.near_clip_plane ?? d?.m_NearClipPlane ?? d?.nearClipPlane ?? 0.1;
+                    asset.farClipPlane    = d?.far_clip_plane  ?? d?.m_FarClipPlane  ?? d?.farClipPlane  ?? 1000;
+                    asset.backgroundColor = (() => {
+                        const c = d?.m_BackGroundColor ?? d?.m_ClearColor ?? d?.backgroundColor;
+                        return c ? [c.r ?? c.x ?? 0, c.g ?? c.y ?? 0, c.b ?? c.z ?? 0, c.a ?? c.w ?? 1] : null;
+                    })();
+                    asset.m_ClearFlags    = d?.m_ClearFlags ?? 1;
+                    asset.depth           = d?.m_Depth ?? 0;
+
+                } else if (classID === 108) {
+                    asset.m_GameObject = d?.m_GameObject;
+                    asset.m_Type       = d?.m_Type ?? 0;
+                    asset.m_Color      = (() => {
+                        const c = d?.m_Color ?? d?.color;
+                        return c ? { r: c.r ?? c.x ?? 1, g: c.g ?? c.y ?? 1, b: c.b ?? c.z ?? 1, a: c.a ?? c.w ?? 1 } : null;
+                    })();
+                    asset.m_Intensity  = d?.m_Intensity ?? d?.intensity ?? 1;
+                    asset.m_Range      = d?.m_Range     ?? d?.range     ?? 10;
+                    asset.m_SpotAngle  = d?.m_SpotAngle ?? 30;
+
                 } else if (classID === 83) {
-                    asset.channels      = d?.m_Channels;
-                    asset.frequency     = d?.m_Frequency;
-                    asset.bitsPerSample = d?.m_BitsPerSample;
+                    asset.channels             = d?.m_Channels;
+                    asset.frequency            = d?.m_Frequency;
+                    asset.bitsPerSample        = d?.m_BitsPerSample;
+                    asset.compressionFormat    = d?.m_CompressionFormat ?? d?.m_Type;
+                    const audioRaw = extractRawBytes(d?.m_AudioData ?? d?.m_Data ?? d?.['audio data']);
+                    if (audioRaw && audioRaw.length > 0) asset.m_AudioData = { raw: audioRaw };
+
                 } else if (classID === 49) {
                     const t = extractString(d?.m_Script);
                     if (t) asset.text = t.slice(0, 4096);
+
                 } else if (classID === 1) {
-                    asset.isActive  = d?.m_IsActive;
-                    asset.isStatic  = d?.m_IsStatic;
-                    asset.layer     = d?.m_Layer;
-                    asset.tag       = d?.m_Tag;
+                    asset.isActive   = d?.m_IsActive;
+                    asset.isStatic   = d?.m_IsStatic;
+                    asset.layer      = d?.m_Layer;
+                    asset.tag        = d?.m_Tag;
                     asset.components = d?.m_Component;
+
                 } else if (classID === 4) {
                     asset.localPosition = d?.m_LocalPosition;
                     asset.localRotation = d?.m_LocalRotation;
                     asset.localScale    = d?.m_LocalScale;
                     asset.children      = d?.m_Children;
                     asset.father        = d?.m_Father;
+                    asset.m_GameObject  = d?.m_GameObject;
+
+                } else if (classID === 54) {
+                    asset.m_GameObject   = d?.m_GameObject;
+                    asset.mass           = d?.m_Mass ?? 1;
+                    asset.drag           = d?.m_Drag ?? 0;
+                    asset.angularDrag    = d?.m_AngularDrag ?? 0.05;
+                    asset.useGravity     = d?.m_UseGravity ?? true;
+                    asset.isKinematic    = d?.m_IsKinematic ?? false;
+                    asset.constraints    = d?.m_Constraints ?? 0;
+                    asset.hasRigidbody   = true;
+
+                } else if (classID === 65) {
+                    asset.m_GameObject   = d?.m_GameObject;
+                    asset.isTrigger      = d?.m_IsTrigger ?? false;
+                    asset.colliderType   = 'box';
+                    asset.colliderParams = {
+                        size:   d?.m_Size   ?? { x:1, y:1, z:1 },
+                        center: d?.m_Center ?? { x:0, y:0, z:0 },
+                    };
+
+                } else if (classID === 135 || classID === 136) {
+                    asset.m_GameObject   = d?.m_GameObject;
+                    asset.isTrigger      = d?.m_IsTrigger ?? false;
+                    asset.colliderType   = classID === 135 ? 'capsule' : 'sphere';
+                    asset.colliderParams = {
+                        radius:    d?.m_Radius ?? 0.5,
+                        height:    d?.m_Height ?? 2,
+                        center:    d?.m_Center ?? { x:0, y:0, z:0 },
+                        direction: d?.m_Direction ?? 1,
+                    };
                 }
             } else {
                 asset.name = heuristicName(slice, le);

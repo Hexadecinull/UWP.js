@@ -197,16 +197,31 @@ export function decodeTexture2D(imageData, width, height, fmt) {
     let rgba;
     try {
         switch (fmt) {
-            case 1:  rgba = decodeAlpha8 (imageData, w, h); break;
+            case 1:  rgba = decodeAlpha8  (imageData, w, h); break;
             case 2:  rgba = decodeARGB4444(imageData, w, h); break;
-            case 3:  rgba = decodeRGB24  (imageData, w, h); break;
-            case 4:  rgba = decodeRGBA32 (imageData, w, h); break;
-            case 5:  rgba = decodeARGB32 (imageData, w, h); break;
-            case 7:  rgba = decodeRGB565 (imageData, w, h); break;
+            case 3:  rgba = decodeRGB24   (imageData, w, h); break;
+            case 4:  rgba = decodeRGBA32  (imageData, w, h); break;
+            case 5:  rgba = decodeARGB32  (imageData, w, h); break;
+            case 7:  rgba = decodeRGB565  (imageData, w, h); break;
+            case 9: {
+                const out = new Uint8Array(w*h*4);
+                const view = new DataView(imageData.buffer, imageData.byteOffset, imageData.byteLength);
+                for (let i=0;i<w*h;i++) {
+                    const v = Math.round(view.getUint16(i*2,true)/65535*255);
+                    out[i*4]=v; out[i*4+1]=v; out[i*4+2]=v; out[i*4+3]=255;
+                }
+                rgba = out; break;
+            }
             case 10: rgba = decodeDXT1   (imageData, w, h); break;
             case 12: rgba = decodeDXT5   (imageData, w, h); break;
             case 13: rgba = decodeARGB4444(imageData, w, h); break;
             case 14: rgba = decodeBGRA32 (imageData, w, h); break;
+            case 34: case 35: case 36: case 37:
+            case 38: case 51: case 52: case 53: {
+                rgba = new Uint8Array(w*h*4);
+                for (let i=0;i<w*h;i++) { rgba[i*4]=180; rgba[i*4+1]=180; rgba[i*4+2]=180; rgba[i*4+3]=255; }
+                break;
+            }
             default: return null;
         }
     } catch { return null; }

@@ -81,6 +81,10 @@ export class UWPjsRuntime {
         const monoBehaviours= [];
         const materials     = [];
 
+        const rigidbodies   = [];
+        const boxColliders  = [];
+        const physColliders = [];
+
         for (const { objects } of assetFiles) {
             if (!objects) continue;
             for (const obj of objects) {
@@ -91,8 +95,12 @@ export class UWPjsRuntime {
                     case 21:  materials.push(obj);      break;
                     case 23:  meshRenderers.push(obj);  break;
                     case 33:  meshFilters.push(obj);    break;
+                    case 54:  rigidbodies.push(obj);    break;
+                    case 65:  boxColliders.push(obj);   break;
                     case 108: lights.push(obj);         break;
                     case 114: monoBehaviours.push(obj); break;
+                    case 135:
+                    case 136: physColliders.push(obj);  break;
                 }
             }
         }
@@ -197,6 +205,30 @@ export class UWPjsRuntime {
 
         for (const go of this.gameObjects.values()) {
             if (!go.meshName) go.meshName = inferMeshName(go.name);
+        }
+
+        for (const rb of rigidbodies) {
+            const goPathID = rb.m_GameObject?.m_PathID ?? rb.m_GameObject?.pathID ?? rb.pathID;
+            const go = this.gameObjects.get(goPathID);
+            if (go) {
+                go.hasRigidbody  = true;
+                go.mass          = rb.mass;
+                go.drag          = rb.drag;
+                go.angularDrag   = rb.angularDrag;
+                go.useGravity    = rb.useGravity;
+                go.isKinematic   = rb.isKinematic;
+                go.constraints   = rb.constraints;
+            }
+        }
+
+        for (const col of [...boxColliders, ...physColliders]) {
+            const goPathID = col.m_GameObject?.m_PathID ?? col.m_GameObject?.pathID ?? col.pathID;
+            const go = this.gameObjects.get(goPathID);
+            if (go) {
+                go.colliderType   = col.colliderType;
+                go.colliderParams = col.colliderParams;
+                go.isTrigger      = col.isTrigger;
+            }
         }
 
         const allMonoNames = this.assemblyMeta
