@@ -216,12 +216,24 @@ export function parseDotNetAssembly(buffer, name) {
             }
         }
 
-        result.ok         = true;
-        result.clrVersion = version;
-        result.typeDefs   = typeDefs;
-        result.methodDefs = methodDefs;
-        result.typeCount  = typeDefs.length;
-        result.methodCount= methodDefs.length;
+        result.ok          = true;
+        result.clrVersion  = version;
+        result.typeDefs    = typeDefs;
+        result.methodDefs  = methodDefs;
+        result.typeCount   = typeDefs.length;
+        result.methodCount = methodDefs.length;
+        result.memberRefs  = (() => {
+            if (rowCounts[MEMBERREF] === 0) return [];
+            const mrBase2 = tableOffset(MEMBERREF);
+            const rs2     = tableRowSize(MEMBERREF);
+            const refs    = [];
+            for (let r = 0; r < rowCounts[MEMBERREF]; r++) {
+                const base2   = mrBase2 + r * rs2;
+                const nameIdx2 = readIdx(strIdxSz, base2 + cidxSize([TYPEDEF,1,2,6,26]));
+                refs.push(strAt(nameIdx2));
+            }
+            return refs;
+        })();
 
         result.monoBehaviours = typeDefs.filter(t => {
             const n = t.name;

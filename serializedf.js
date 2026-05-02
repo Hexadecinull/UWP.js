@@ -445,15 +445,16 @@ export function parseSerializedFile(buffer, fileName) {
 
                 } else if (classID === 20) {
                     asset.m_GameObject    = d?.m_GameObject;
-                    asset.fieldOfView     = d?.field_of_view ?? d?.m_FieldOfView ?? d?.fieldOfView ?? 60;
-                    asset.nearClipPlane   = d?.near_clip_plane ?? d?.m_NearClipPlane ?? d?.nearClipPlane ?? 0.1;
-                    asset.farClipPlane    = d?.far_clip_plane  ?? d?.m_FarClipPlane  ?? d?.farClipPlane  ?? 1000;
+                    asset.fieldOfView     = d?.['field of view'] ?? d?.field_of_view ?? d?.m_FieldOfView ?? 60;
+                    asset.nearClipPlane   = d?.['near clip plane'] ?? d?.near_clip_plane ?? d?.m_NearClipPlane ?? 0.1;
+                    asset.farClipPlane    = d?.['far clip plane']  ?? d?.far_clip_plane  ?? d?.m_FarClipPlane  ?? 1000;
                     asset.backgroundColor = (() => {
-                        const c = d?.m_BackGroundColor ?? d?.m_ClearColor ?? d?.backgroundColor;
-                        return c ? [c.r ?? c.x ?? 0, c.g ?? c.y ?? 0, c.b ?? c.z ?? 0, c.a ?? c.w ?? 1] : null;
+                        const c = d?.m_BackGroundColor ?? d?.m_BackgroundColor ?? d?.backgroundColor;
+                        return c ? [c.r??c.x??0.2, c.g??c.y??0.2, c.b??c.z??0.2, c.a??c.w??1] : [0.2,0.2,0.2,1];
                     })();
                     asset.m_ClearFlags    = d?.m_ClearFlags ?? 1;
                     asset.depth           = d?.m_Depth ?? 0;
+                    asset.orthographic    = d?.orthographic ?? 0;
 
                 } else if (classID === 108) {
                     asset.m_GameObject = d?.m_GameObject;

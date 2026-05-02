@@ -312,10 +312,14 @@ footer a:hover {
     .asset-list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: var(--fg-subtle); }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+@supports selector(::-webkit-scrollbar) {
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--fg-subtle); }
+}
 
 #viewport-section {
     width: 100%;

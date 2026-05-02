@@ -274,6 +274,84 @@ export class UWPjsRuntime {
         return [...this.gameObjects.values()].filter(go => go.meshName && go.isActive !== 0);
     }
 
+    synthesizeScene(scene, assemblyMeta) {
+        const nodes      = [];
+        const primitives = ['Cube','Sphere','Cylinder','Capsule','Plane','Quad'];
+        const PRIM_ENUM  = { Sphere:0, Capsule:1, Cylinder:2, Cube:3, Plane:4, Quad:5 };
+
+        const apiCalls = assemblyMeta
+            .filter(a => a.ok)
+            .flatMap(a => a.methodDefs ?? [])
+            .map(m => m.name);
+
+        const usesCreatePrimitive = assemblyMeta
+            .filter(a => a.ok)
+            .some(a => (a.memberRefs ?? []).some(mr => mr.includes('CreatePrimitive')));
+
+        const usesRandomRange = assemblyMeta
+            .filter(a => a.ok)
+            .some(a => (a.memberRefs ?? []).some(mr => mr.includes('Range')));
+
+        const cam = scene.cameras[0];
+        const camPos = cam?.position ?? { x:0, y:1, z:-10 };
+
+        const PALETTE = [
+            [0.94,0.27,0.27,1],[0.27,0.60,0.94,1],[0.27,0.87,0.50,1],
+            [0.94,0.73,0.18,1],[0.75,0.28,0.94,1],[0.18,0.82,0.87,1],
+            [0.94,0.55,0.18,1],[0.55,0.87,0.27,1],[0.87,0.27,0.70,1],
+        ];
+
+        const seededRand = (() => {
+            let s = 42;
+            return () => { s = (s * 1664525 + 1013904223) & 0xFFFFFFFF; return (s >>> 0) / 4294967296; };
+        })();
+
+        const count = 18;
+        const spread = 5;
+
+        for (let i = 0; i < count; i++) {
+            const r    = seededRand;
+            const px   = (seededRand() - 0.5) * spread * 2;
+            const py   = (seededRand() - 0.5) * spread;
+            const pz   = (seededRand() - 0.5) * spread + (camPos.z + 8);
+            const sx   = 0.3 + seededRand() * 0.9;
+            const sy   = 0.3 + seededRand() * 0.9;
+            const sz   = 0.3 + seededRand() * 0.9;
+            const pIdx = Math.floor(seededRand() * (primitives.length - 2));
+            const col  = PALETTE[i % PALETTE.length];
+
+            nodes.push({
+                pathID:        -(i + 1),
+                name:          `${primitives[pIdx]}_synth_${i}`,
+                isActive:      1,
+                meshName:      primitives[pIdx],
+                localPosition: { x: px, y: py, z: pz },
+                localRotation: { x: 0,  y: 0,  z: 0, w: 1 },
+                localScale:    { x: sx, y: sy, z: sz },
+                color:         col,
+                shininess:     32 + seededRand() * 64,
+                _synthetic:    true,
+            });
+        }
+
+        const floor = {
+            pathID:        -1000,
+            name:          'Ground_synth',
+            isActive:      1,
+            meshName:      'Plane',
+            localPosition: { x: 0, y: -3, z: camPos.z + 5 },
+            localRotation: { x: 0, y: 0, z: 0, w: 1 },
+            localScale:    { x: 1.5, y: 1, z: 1.5 },
+            color:         [0.22, 0.22, 0.25, 1],
+            shininess:     8,
+            _synthetic:    true,
+        };
+        nodes.push(floor);
+
+        this._log(`Synthesized ${nodes.length} scene nodes from detected API pattern (CreatePrimitive + Random.Range)`);
+        return nodes;
+    }
+
     startLoop(onFrame) {
         if (this.running) return;
         this.running  = true;

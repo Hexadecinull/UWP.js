@@ -143,16 +143,46 @@ function handleAudio(objects, emulator) {
             clip.name || '(unnamed)',
             `${clip.channels ?? '?'}ch  ${clip.frequency ?? '?'} Hz  ${clip.bitsPerSample ?? '?'}-bit`
         );
+        const actions = document.createElement('div');
+        actions.className = 'asset-actions';
         if (emulator && clip.name) {
-            const actions = document.createElement('div');
-            actions.className = 'asset-actions';
             const btn = document.createElement('button');
             btn.textContent = '▶ Play';
             btn.onclick = () => emulator.playClip(clip.name);
             actions.appendChild(btn);
-            card.appendChild(actions);
         }
+        const wav = audioToWAV(clip);
+        if (wav) {
+            const url = URL.createObjectURL(wav);
+            const a   = document.createElement('a');
+            a.href = url; a.download = `${clip.name || 'audio'}.wav`;
+            a.textContent = '↓ WAV';
+            a.onclick = () => setTimeout(() => URL.revokeObjectURL(url), 2000);
+            actions.appendChild(a);
+        }
+        if (actions.children.length) card.appendChild(actions);
     }
+}
+
+function audioToWAV(asset) {
+    const rawField = asset.m_AudioData ?? asset.audioData;
+    const raw = rawField?.raw instanceof Uint8Array ? rawField.raw : null;
+    if (!raw || raw.length === 0) return null;
+    const channels = asset.channels ?? 1;
+    const rate     = asset.frequency ?? 44100;
+    const bits     = asset.bitsPerSample ?? 16;
+    const blockAlign = channels * (bits >> 3);
+    const buf = new ArrayBuffer(44 + raw.length);
+    const dv  = new DataView(buf);
+    const wr4 = (p, s) => { for (let i=0;i<4;i++) dv.setUint8(p+i, s.charCodeAt(i)); };
+    wr4(0,'RIFF'); dv.setUint32(4, 36+raw.length, true);
+    wr4(8,'WAVE'); wr4(12,'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+    dv.setUint16(22, channels, true); dv.setUint32(24, rate, true);
+    dv.setUint32(28, rate*blockAlign, true); dv.setUint16(32, blockAlign, true);
+    dv.setUint16(34, bits, true); wr4(36,'data'); dv.setUint32(40, raw.length, true);
+    new Uint8Array(buf, 44).set(raw);
+    return new Blob([buf], { type: 'audio/wav' });
 }
 
 function handleMeshes(objects) {
@@ -160,8 +190,52 @@ function handleMeshes(objects) {
     if (!meshes.length) return;
     makeSectionHeader('Meshes', meshes.length);
     for (const m of meshes) {
-        makeCard(m.name || '(unnamed)', m.parseError ? `Parse error: ${m.parseError}` : 'Mesh — uploaded to GPU if valid');
+        const card = makeCard(m.name || '(unnamed)', m.parseError ? `Parse error: ${m.parseError}` : 'Mesh');
+        const objStr = m.meshData && !m.parseError ? meshToOBJ(m.meshData, m.name || 'mesh') : null;
+        if (objStr) {
+            const actions = document.createElement('div');
+            actions.className = 'asset-actions';
+            const blob = new Blob([objStr], { type: 'text/plain' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href = url; a.download = `${m.name || 'mesh'}.obj`;
+            a.textContent = '↓ OBJ';
+            a.onclick = () => setTimeout(() => URL.revokeObjectURL(url), 2000);
+            actions.appendChild(a);
+            card.appendChild(actions);
+        }
     }
+}
+
+function meshToOBJ(meshData, name) {
+    try {
+        let positions = null, normals = null, uvs = null, faces = null;
+        const mv = meshData?.m_Vertices ?? meshData?.vertices;
+        if (mv?.raw instanceof Uint8Array) {
+            const r  = mv.raw;
+            const dv = new DataView(r.buffer, r.byteOffset, r.byteLength);
+            const n  = r.byteLength >> 2;
+            positions = [];
+            for (let i = 0; i < n; i += 3) positions.push([dv.getFloat32(i*4,true), dv.getFloat32((i+1)*4,true), dv.getFloat32((i+2)*4,true)]);
+        }
+        if (!positions?.length) return null;
+        const ir = meshData.m_IndexBuffer ?? meshData.m_Indices;
+        if (ir?.raw instanceof Uint8Array) {
+            const r  = ir.raw;
+            const dv = new DataView(r.buffer, r.byteOffset, r.byteLength);
+            faces = [];
+            if (r.byteLength % 4 === 0) {
+                for (let i = 0; i < r.byteLength; i += 12) faces.push([dv.getUint32(i,true)+1, dv.getUint32(i+4,true)+1, dv.getUint32(i+8,true)+1]);
+            } else {
+                for (let i = 0; i < r.byteLength; i += 6) faces.push([dv.getUint16(i,true)+1, dv.getUint16(i+2,true)+1, dv.getUint16(i+4,true)+1]);
+            }
+        }
+        let obj = `# Exported by UWP.js\n# Mesh: ${name}\n\n`;
+        for (const [x,y,z] of positions) obj += `v ${x.toFixed(6)} ${y.toFixed(6)} ${z.toFixed(6)}\n`;
+        obj += '\n';
+        if (faces) for (const [a,b,c] of faces) obj += `f ${a} ${b} ${c}\n`;
+        return obj;
+    } catch { return null; }
 }
 
 function handleOtherAssets(objects) {

@@ -7,6 +7,18 @@ import { UWPjsInput }          from './input.js';
 import { parseSerializedFile }  from './serializedf.js';
 import { decodeTexture2D }      from './textures.js';
 
+function eulerToQuat(rx, ry, rz) {
+    const cx = Math.cos(rx * 0.5), sx = Math.sin(rx * 0.5);
+    const cy = Math.cos(ry * 0.5), sy = Math.sin(ry * 0.5);
+    const cz = Math.cos(rz * 0.5), sz = Math.sin(rz * 0.5);
+    return {
+        x: sx*cy*cz + cx*sy*sz,
+        y: cx*sy*cz - sx*cy*sz,
+        z: cx*cy*sz + sx*sy*cz,
+        w: cx*cy*cz - sx*sy*sz,
+    };
+}
+
 export class UWPjs {
     constructor(buffer, opts = {}) {
         this.buffer   = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
@@ -60,7 +72,13 @@ export class UWPjs {
         this.runtime.simulateLifecycle(scene);
         this.renderer.loadMeshes(allObjects);
 
-        const sceneNodes = this.runtime.getSceneNodes();
+        let sceneNodes = this.runtime.getSceneNodes();
+
+        if (sceneNodes.length === 0) {
+            sceneNodes = this.runtime.synthesizeScene(scene, this.runtime.assemblyMeta);
+            this._log(`Using synthesized scene (${sceneNodes.length} nodes) — no stored mesh objects found`);
+        }
+
         this.renderer.setSceneNodes(sceneNodes);
 
         if (sceneNodes.length > 0) {
@@ -103,11 +121,29 @@ export class UWPjs {
         const now = performance.now();
         const dt  = Math.min((now - this._prevTime) / 1000, 0.05);
         this._prevTime = now;
+        this._elapsed  = (this._elapsed ?? 0) + dt;
 
         this.input.update(dt);
         this.physics.step(dt);
+        this._animateSynthetic(this._elapsed);
         this.renderer.renderFrame();
         this.input.lateUpdate();
+    }
+
+    _animateSynthetic(t) {
+        const nodes = this.renderer._sceneNodes;
+        if (!nodes?.length) return;
+        for (let i = 0; i < nodes.length; i++) {
+            const n = nodes[i];
+            if (!n._synthetic) continue;
+            const phase = i * 0.53;
+            n.localPosition.y += Math.sin(t * 0.8 + phase) * 0.003;
+            n.localRotation = eulerToQuat(
+                t * 0.3 * (i % 3 === 0 ? 1 : -0.7) + phase,
+                t * 0.5 * (i % 2 === 0 ? 1 : -0.5) + phase * 1.3,
+                0
+            );
+        }
     }
 
     async _uploadTextures(allObjects) {
