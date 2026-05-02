@@ -255,7 +255,10 @@ export class UWPjsPhysics {
             if (node.hasRigidbody) this.addRigidbody(node);
             if (node.colliderType) this.addCollider(node, node.colliderType, node.colliderParams ?? {});
             else if (node.meshName) {
-                const type = node.meshName === 'Sphere' ? 'sphere' : 'capsule' in node.meshName.toLowerCase() ? 'capsule' : 'box';
+                const meshLower = node.meshName.toLowerCase();
+                const type = meshLower === 'sphere' ? 'sphere'
+                           : meshLower.includes('capsule') ? 'capsule'
+                           : 'box';
                 this.addCollider(node, type, {});
             }
         }
