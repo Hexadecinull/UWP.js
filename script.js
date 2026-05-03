@@ -25,7 +25,13 @@ applyTheme();
 function setStatus(text)    { statusDiv.textContent = text; }
 function appendStatus(text) { statusDiv.textContent += '\n' + text; }
 function clearAssets()      { assetList.innerHTML = '';  }
-function clearScene()       { if (scenePanel) scenePanel.innerHTML = ''; }
+function clearScene() {
+    if (scenePanel) {
+        scenePanel.innerHTML = '';
+        scenePanel.closest('#scene-wrap')?.style.removeProperty('display');
+    }
+    document.getElementById('log-wrap')?.style.removeProperty('display');
+}
 
 function appendRuntimeLog(msg) {
     if (!runtimeLog) return;
@@ -398,6 +404,17 @@ unityFileInput.addEventListener('change', async (e) => {
         onLog: msg => appendRuntimeLog(msg),
     });
     const result = await activeEmulator.start();
+
+    if (result?.isDrop) {
+        if (scenePanel)  scenePanel.closest('#scene-wrap')?.style.setProperty('display','none');
+        document.getElementById('log-wrap')?.style.setProperty('display','none');
+        const hint = document.createElement('p');
+        hint.className   = 'placeholder';
+        hint.textContent = 'Drop by Notch loaded — click the canvas and press D to play, S to toggle sound.';
+        assetList.appendChild(hint);
+        return;
+    }
+
     if (result?.scene) {
         buildSceneTree(result.scene);
         buildAssemblyPanel(result.scene);

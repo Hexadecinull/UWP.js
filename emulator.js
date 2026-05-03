@@ -55,7 +55,16 @@ export class UWPjs {
         }
 
         await this.runtime.init();
-        this.runtime.loadAssemblies(files);
+        const asmMeta = this.runtime.loadAssemblies(files);
+
+        const isDropGame = asmMeta.some(a =>
+            a.ok && (a.typeDefs ?? []).some(t => t.name === 'ZoomCamera' || t.name === 'Cubelet')
+        );
+
+        if (isDropGame) {
+            this._log('Detected: Drop by Notch — launching native game engine');
+            return await this._startDrop();
+        }
 
         const scene      = this.runtime.buildSceneGraph(sfList);
         const allObjects = sfList.flatMap(sf => sf.objects);
@@ -66,55 +75,57 @@ export class UWPjs {
         }
 
         await this._uploadTextures(allObjects);
-
         this._applyMaterialsToNodes(scene, allObjects);
-
         this.runtime.simulateLifecycle(scene);
         this.renderer.loadMeshes(allObjects);
 
         let sceneNodes = this.runtime.getSceneNodes();
-
         if (sceneNodes.length === 0) {
             sceneNodes = this.runtime.synthesizeScene(scene, this.runtime.assemblyMeta);
-            this._log(`Using synthesized scene (${sceneNodes.length} nodes) — no stored mesh objects found`);
+            this._log(`Using synthesized scene (${sceneNodes.length} nodes)`);
         }
-
         this.renderer.setSceneNodes(sceneNodes);
-
-        if (sceneNodes.length > 0) {
-            const names = sceneNodes.map(n => `${n.name}(${n.meshName})`).slice(0, 6).join(', ');
-            this._log(`Render nodes: ${sceneNodes.length} — ${names}${sceneNodes.length > 6 ? ' …' : ''}`);
-        }
-
         this.physics.buildFromScene(sceneNodes);
 
         const activeCam = scene.cameras[0] ?? null;
-        if (activeCam) {
-            this.renderer.setCamera(activeCam);
-            this._log(`Camera: "${activeCam.name}" fov=${activeCam.fieldOfView}° near=${activeCam.nearClip} far=${activeCam.farClip}`);
-        }
-
-        if (scene.lights.length > 0) {
-            this.renderer.setLights(scene.lights);
-            this._log(`Lights: ${scene.lights.length} — ${scene.lights.map(l => l.name).join(', ')}`);
-        }
+        if (activeCam) { this.renderer.setCamera(activeCam); this._log(`Camera: "${activeCam.name}" fov=${activeCam.fieldOfView}°`); }
+        if (scene.lights.length > 0) { this.renderer.setLights(scene.lights); }
 
         this.renderer.setSceneInfo({
-            gameObjects:     scene.gameObjects.length,
-            cameras:         scene.cameras.length,
-            lights:          scene.lights.length,
-            monoBehaviours:  scene.monoBehaviours.length,
-            assemblies:      scene.assemblies,
-            backgroundColor: activeCam?.backgroundColor?.slice(0, 3) ?? [0.08, 0.10, 0.15],
+            gameObjects:    scene.gameObjects.length,
+            cameras:        scene.cameras.length,
+            lights:         scene.lights.length,
+            monoBehaviours: scene.monoBehaviours.length,
+            assemblies:     scene.assemblies,
+            backgroundColor: activeCam?.backgroundColor?.slice(0,3) ?? [0.08,0.10,0.15],
             camera:          activeCam,
-            lightsArr:       scene.lights,
         });
 
         this._prevTime = performance.now();
         this.runtime.startLoop(() => this._frame());
         this._log('Game loop started.');
-
         return { ok: true, scene, sfCount: sfList.length };
+    }
+
+    async _startDrop() {
+        const { DropGame } = await import('./game.js');
+        const canvas = document.getElementById(this.opts.canvasId ?? 'game-canvas');
+        if (!canvas) return { ok: false, error: 'Canvas not found' };
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        this._dropGame = new DropGame(canvas, audioCtx);
+        this._dropGame.start();
+
+        this._dropKeyHandler = (e) => {
+            if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+            this._dropGame.handleKey(e.key);
+        };
+        window.addEventListener('keydown', this._dropKeyHandler);
+
+        canvas.style.cursor = 'default';
+        this._log('Drop loaded. Press D to start.');
+        return { ok: true, isDrop: true, sfCount: 0 };
     }
 
     _frame() {
@@ -200,6 +211,14 @@ export class UWPjs {
     stop() {
         this.runtime.stopLoop();
         this.audio.stopAll();
+        if (this._dropGame) {
+            this._dropGame.stop();
+            this._dropGame = null;
+        }
+        if (this._dropKeyHandler) {
+            window.removeEventListener('keydown', this._dropKeyHandler);
+            this._dropKeyHandler = null;
+        }
         this._log('Stopped.');
     }
 
